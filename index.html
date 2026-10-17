@@ -44,7 +44,8 @@ body{background:var(--bg);color:var(--fg);font:15px/1.4 var(--font);overflow:hid
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .grip-btn{display:block;width:100%;border:0;background:none;padding:4px 0 12px;margin-top:-6px;cursor:grab;touch-action:none}
 .grip{width:44px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
-.sheet{transition:max-height .25s ease}
+.sheet{transition:transform .25s ease;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.sheet.dragging{transition:none}
 .sheet.collapsed{overflow:hidden}
 .sheet.collapsed .status{margin-bottom:0}
 .sheet.collapsed .status > :not(b),.sheet.collapsed details,.sheet.collapsed .note{display:none}
@@ -75,7 +76,8 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     <input id="q" type="search" placeholder="Adres of plaats zoeken" autocomplete="off" aria-label="Adres zoeken">
     <div id="sugg" hidden></div>
   </div>
-  <button class="btn" id="gps" aria-label="Mijn locatie controleren">📍</button>
+  <button class="btn" id="onder" type="button" aria-label="Toon luchtfoto">Foto</button>
+  <button class="btn" id="gps" type="button" aria-label="Mijn locatie controleren">📍</button>
 </div>
 
 <section class="sheet" id="sheet" aria-live="polite">
@@ -85,7 +87,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend.</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 5</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -125,8 +127,26 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
 
   // Kaart
   const map = L.map("map",{zoomControl:false,attributionControl:true}).setView([52.08,5.20],10);
-  L.tileLayer("https://service.pdok.nl/brt/achtergrondkaart/wmts/v2_0/standaard/EPSG:3857/{z}/{x}/{y}.png",
-    {maxZoom:19,attribution:'Kaart: <a href="https://www.pdok.nl">PDOK</a> | Data: Provincie Utrecht'}).addTo(map);
+  const kaartLaag = L.tileLayer("https://service.pdok.nl/brt/achtergrondkaart/wmts/v2_0/standaard/EPSG:3857/{z}/{x}/{y}.png",
+    {maxZoom:19,attribution:'Kaart: <a href="https://www.pdok.nl">PDOK</a> | Data: Provincie Utrecht'});
+  const LUCHTFOTO = ["Actueel_orthoHR","Actueel_ortho25"];
+  let lfIdx=0, lfFouten=0;
+  const fotoLaag = L.tileLayer("https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/"+LUCHTFOTO[0]+"/EPSG:3857/{z}/{x}/{y}.jpeg",
+    {maxZoom:21,maxNativeZoom:19,attribution:'Luchtfoto: <a href="https://www.pdok.nl">PDOK / Beeldmateriaal Nederland</a> | Data: Provincie Utrecht'});
+  // Valt de hoge-resolutie luchtfoto weg, schakel dan over op de 25 cm-versie
+  fotoLaag.on("tileerror",()=>{ if(++lfFouten>6 && lfIdx===0){ lfIdx=1; fotoLaag.setUrl("https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/"+LUCHTFOTO[1]+"/EPSG:3857/{z}/{x}/{y}.jpeg"); } });
+  let ondergrond = store.get("ovu_ondergrond")==="foto" ? "foto" : "kaart";
+  function zetOndergrond(o){
+    ondergrond=o; store.set("ovu_ondergrond",o);
+    if(o==="foto"){ map.removeLayer(kaartLaag); fotoLaag.addTo(map); }
+    else { map.removeLayer(fotoLaag); kaartLaag.addTo(map); }
+    fotoLaag.bringToBack(); kaartLaag.bringToBack();
+    const b=document.getElementById("onder");
+    b.textContent = o==="foto" ? "Kaart" : "Foto";
+    b.setAttribute("aria-label", o==="foto" ? "Toon kaart" : "Toon luchtfoto");
+  }
+  zetOndergrond(ondergrond);
+  document.getElementById("onder").addEventListener("click",()=>zetOndergrond(ondergrond==="foto"?"kaart":"foto"));
 
   let layers = [];          // {name,title,afd}
   const wmsLayers = {};     // name -> L.tileLayer.wms
@@ -278,13 +298,31 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   }
   setCollapsed(!!store.get("ovu_ingeklapt"));
   grip.addEventListener("click",()=>setCollapsed(!sheet.classList.contains("collapsed")));
-  let y0=null, opBovenkant=true;
-  sheet.addEventListener("touchstart",e=>{ y0=e.touches[0].clientY; opBovenkant=sheet.scrollTop<=0; },{passive:true});
-  sheet.addEventListener("touchend",e=>{
+  // Slepen: het paneel volgt de vinger omlaag en blijft ingeklapt liggen na loslaten
+  let y0=null, dy=0, slepen=false, startScroll=0;
+  sheet.addEventListener("touchstart",e=>{
+    y0=e.touches[0].clientY; dy=0; slepen=false; startScroll=sheet.scrollTop;
+  },{passive:true});
+  sheet.addEventListener("touchmove",e=>{
     if(y0===null) return;
-    const dy=e.changedTouches[0].clientY-y0; y0=null;
-    if(dy>40 && opBovenkant) setCollapsed(true);
-    else if(dy<-40 && sheet.classList.contains("collapsed")) setCollapsed(false);
+    dy=e.touches[0].clientY-y0;
+    const ingeklapt=sheet.classList.contains("collapsed");
+    if(!ingeklapt && dy>0 && startScroll<=0 && sheet.scrollTop<=0){
+      slepen=true; e.preventDefault();
+      sheet.classList.add("dragging");
+      sheet.style.transform="translateY("+dy+"px)";
+    }else if(ingeklapt && dy<0){
+      slepen=true; e.preventDefault();
+    }
+  },{passive:false});
+  sheet.addEventListener("touchend",()=>{
+    if(y0===null) return;
+    sheet.classList.remove("dragging");
+    sheet.style.transform="";
+    const ingeklapt=sheet.classList.contains("collapsed");
+    if(slepen && !ingeklapt && dy>50) setCollapsed(true);
+    else if(slepen && ingeklapt && dy<-30) setCollapsed(false);
+    y0=null; slepen=false; dy=0;
   },{passive:true});
   // Tik op de uitslag in ingeklapte stand klapt het paneel open
   document.getElementById("status").addEventListener("click",()=>{ if(sheet.classList.contains("collapsed")) setCollapsed(false); });
