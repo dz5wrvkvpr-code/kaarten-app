@@ -42,7 +42,14 @@ body{background:var(--bg);color:var(--fg);font:15px/1.4 var(--font);overflow:hid
   border-radius:16px 16px 0 0;box-shadow:0 -4px 18px rgba(0,0,0,.18);max-height:62%;overflow:auto;
   padding-block:10px calc(14px + env(safe-area-inset-bottom,0px));
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-.grip{width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 10px}
+.grip-btn{display:block;width:100%;border:0;background:none;padding:4px 0 12px;margin-top:-6px;cursor:grab;touch-action:none}
+.grip{width:44px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet{transition:max-height .25s ease}
+.sheet.collapsed{overflow:hidden}
+.sheet.collapsed .status{margin-bottom:0}
+.sheet.collapsed .status > :not(b),.sheet.collapsed details,.sheet.collapsed .note{display:none}
+.sheet.collapsed .status b{font-size:15px}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
 .status{border-radius:10px;padding:10px 12px;margin-bottom:12px}
 .status.in{background:var(--in-bg);color:var(--in)}
 .status.out{background:var(--out-bg);color:var(--out)}
@@ -71,8 +78,8 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   <button class="btn" id="gps" aria-label="Mijn locatie controleren">📍</button>
 </div>
 
-<section class="sheet" aria-live="polite">
-  <div class="grip"></div>
+<section class="sheet" id="sheet" aria-live="polite">
+  <button class="grip-btn" id="grip" type="button" aria-label="Paneel in- of uitklappen" aria-expanded="true"><div class="grip"></div></button>
   <div id="status" class="status idle"><b>Tik op de kaart of gebruik 📍</b>Dan zie je direct of de locatie in een toepassingsgebied ligt.</div>
   <details id="lagen">
     <summary>Kaartlagen</summary>
@@ -260,6 +267,27 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     },250);
   });
   qEl.addEventListener("keydown",e=>{ if(e.key==="Enter"){ const f=sugg.querySelector("button"); if(f){ e.preventDefault(); f.click(); } } });
+
+  // Paneel in- en uitklappen: tikken op het greepje of omlaag/omhoog vegen
+  const sheet=document.getElementById("sheet"), grip=document.getElementById("grip");
+  function setCollapsed(c){
+    sheet.classList.toggle("collapsed",c);
+    grip.setAttribute("aria-expanded",String(!c));
+    store.set("ovu_ingeklapt",c);
+    setTimeout(()=>map.invalidateSize(),300);
+  }
+  setCollapsed(!!store.get("ovu_ingeklapt"));
+  grip.addEventListener("click",()=>setCollapsed(!sheet.classList.contains("collapsed")));
+  let y0=null, opBovenkant=true;
+  sheet.addEventListener("touchstart",e=>{ y0=e.touches[0].clientY; opBovenkant=sheet.scrollTop<=0; },{passive:true});
+  sheet.addEventListener("touchend",e=>{
+    if(y0===null) return;
+    const dy=e.changedTouches[0].clientY-y0; y0=null;
+    if(dy>40 && opBovenkant) setCollapsed(true);
+    else if(dy<-40 && sheet.classList.contains("collapsed")) setCollapsed(false);
+  },{passive:true});
+  // Tik op de uitslag in ingeklapte stand klapt het paneel open
+  document.getElementById("status").addEventListener("click",()=>{ if(sheet.classList.contains("collapsed")) setCollapsed(false); });
 
   loadCapabilities();
 })();
