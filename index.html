@@ -79,6 +79,18 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
 .ster:disabled{opacity:.4}
 .ster:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hint{font-size:12px;color:var(--muted)}
+.gzoek{position:relative}
+#gzoek{width:100%;height:44px;border:1px solid var(--line);border-radius:10px;padding:0 12px;
+  font:16px var(--font);background:var(--bg);color:var(--fg)}
+#gzoek:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gzoekres{margin-top:6px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+.gzoekres button{display:flex;gap:8px;align-items:baseline;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);
+  background:none;color:var(--fg);padding:11px 12px;font:15px var(--font)}
+.gzoekres button:last-child{border-bottom:0}
+.gzoekres button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.gzoekres .fav{color:#d99a00;flex:none}
+.gzoekres mark{background:none;color:inherit;font-weight:700}
+.gzoekres .leeg{padding:11px 12px;color:var(--muted);font-size:14px}
 .chip{position:fixed;z-index:1000;top:calc(env(safe-area-inset-top,0px) + 62px);
   left:max(10px,env(safe-area-inset-left,0px));max-width:calc(100% - 20px);display:flex;align-items:center;gap:8px;
   background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:999px;
@@ -108,6 +120,10 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   <div id="status" class="status idle"><b>Tik op de kaart of gebruik 📍</b>Dan zie je direct of de locatie in een toepassingsgebied ligt.</div>
   <div class="kies">
     <label for="gebied">Toon op kaart</label>
+    <div class="gzoek">
+      <input id="gzoek" type="search" placeholder="Zoek een gebied, bijv. landschap" autocomplete="off" aria-label="Zoek een gebied" aria-controls="gzoekres">
+      <div id="gzoekres" class="gzoekres" role="listbox" hidden></div>
+    </div>
     <div class="kiesrij">
       <select id="gebied">
         <option value="">Alle werkingsgebieden</option>
@@ -120,7 +136,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 10</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 11</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -375,6 +391,38 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   selEl.addEventListener("change",()=>kiesGebied(selEl.value));
   document.getElementById("chipUit").addEventListener("click",()=>kiesGebied(null));
   document.getElementById("ster").addEventListener("click",wisselFav);
+
+  // Zoeken in gebieden: alle woorden moeten voorkomen in de naam of de afdelingstitel
+  const gz=document.getElementById("gzoek"), gzRes=document.getElementById("gzoekres");
+  function markeer(tekst, woorden){
+    let html=esc(tekst);
+    for(const w of woorden){ if(!w) continue;
+      const re=new RegExp("("+w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+")","ig");
+      html=html.replace(re,"<mark>$1</mark>");
+    }
+    return html;
+  }
+  function zoekGebieden(){
+    const v=norm(gz.value);
+    if(v.length<2){ gzRes.hidden=true; gzRes.textContent=""; return; }
+    const woorden=v.split(" ");
+    const kandidaten=[...new Set((alleNamen.length?alleNamen:BEKEND).concat(favs).filter(Boolean).map(String))];
+    const hits=kandidaten.filter(n=>{ const h=norm(n+" "+labelVoor(n)); return woorden.every(w=>h.includes(w)); })
+      .sort((a,b)=>(isFav(b)-isFav(a)) || labelVoor(a).localeCompare(labelVoor(b),"nl"))
+      .slice(0,8);
+    gzRes.textContent="";
+    if(!hits.length){ const d=document.createElement("div"); d.className="leeg"; d.textContent="Geen gebied gevonden met “"+gz.value.trim()+"”."; gzRes.appendChild(d); }
+    for(const n of hits){
+      const b=document.createElement("button"); b.type="button"; b.setAttribute("role","option");
+      b.innerHTML=(isFav(n)?"<span class='fav' aria-label='favoriet'>★</span>":"")+"<span>"+markeer(labelVoor(n),woorden)+"</span>";
+      b.addEventListener("click",()=>{ gz.value=""; gzRes.hidden=true; gz.blur(); kiesGebied(n); });
+      gzRes.appendChild(b);
+    }
+    gzRes.hidden=false;
+  }
+  let gzT=null;
+  gz.addEventListener("input",()=>{ clearTimeout(gzT); gzT=setTimeout(zoekGebieden,120); });
+  gz.addEventListener("keydown",e=>{ if(e.key==="Enter"){ const f=gzRes.querySelector("button"); if(f){ e.preventDefault(); f.click(); } } if(e.key==="Escape"){ gz.value=""; gzRes.hidden=true; } });
 
   async function checkPoint(latlng){
     if(marker) marker.setLatLng(latlng); else marker=L.marker(latlng).addTo(map);
