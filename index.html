@@ -65,6 +65,19 @@ summary{font-weight:600;cursor:pointer;padding:6px 0}
 label.ly{display:flex;align-items:flex-start;gap:10px;padding:7px 0}
 label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--accent)}
 .note{font-size:12px;color:var(--muted);margin-top:10px}
+.kies{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.kies label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+#gebied{width:100%;min-width:0;height:44px;border:1px solid var(--line);border-radius:10px;padding:0 10px;
+  font:16px var(--font);background:var(--bg);color:var(--fg)}
+#gebied:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sheet.collapsed .kies{display:none}
+.chip{position:fixed;z-index:1000;top:calc(env(safe-area-inset-top,0px) + 62px);
+  left:max(10px,env(safe-area-inset-left,0px));max-width:calc(100% - 20px);display:flex;align-items:center;gap:8px;
+  background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:999px;
+  padding:4px 4px 4px 12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.chip .swatch{width:14px;height:14px;border-radius:3px;flex:none;background:rgba(47,191,113,.45);border:1.5px solid #4f8a2a}
+.chip span.t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip button{flex:none;width:32px;height:32px;border:0;border-radius:999px;background:var(--bg);color:var(--fg);font:600 15px var(--font)}
 .leaflet-control-attribution{font-size:10px}
 </style>
 </head>
@@ -80,14 +93,22 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   <button class="btn" id="gps" type="button" aria-label="Mijn locatie controleren">📍</button>
 </div>
 
+<div class="chip" id="chip" hidden><i class="swatch" aria-hidden="true"></i><span class="t" id="chipTekst"></span><button type="button" id="chipUit" aria-label="Alle werkingsgebieden tonen">✕</button></div>
+
 <section class="sheet" id="sheet" aria-live="polite">
   <button class="grip-btn" id="grip" type="button" aria-label="Paneel in- of uitklappen" aria-expanded="true"><div class="grip"></div></button>
   <div id="status" class="status idle"><b>Tik op de kaart of gebruik 📍</b>Dan zie je direct of de locatie in een toepassingsgebied ligt.</div>
+  <div class="kies">
+    <label for="gebied">Toon op kaart</label>
+    <select id="gebied">
+      <option value="">Alle werkingsgebieden</option>
+    </select>
+  </div>
   <details id="lagen">
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 5</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 6</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -154,7 +175,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   let marker = null;
 
   function addWms(name){
-    if(wmsLayers[name]) return;
+    if(wmsLayers[name] || gekozen) return;
     wmsLayers[name] = L.tileLayer.wms(WMS,{layers:name,format:"image/png",transparent:true,version:"1.3.0",opacity:.55,maxZoom:19}).addTo(map);
   }
   function removeWms(name){ if(wmsLayers[name]){ map.removeLayer(wmsLayers[name]); delete wmsLayers[name]; } }
@@ -209,14 +230,102 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   function setStatus(cls,html){ const s=document.getElementById("status"); s.className="status "+cls; s.innerHTML=html; }
   const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
 
+  // Welk attribuut bevat de naam van het werkingsgebied?
+  const KAND=["naam","Naam","NAAM","werkingsgebied","Werkingsgebied","noemer","Noemer","omschrijving","titel","label","name"];
+  function naamSleutel(p){
+    p=p||{};
+    for(const k of KAND) if(p[k]) return k;
+    return Object.keys(p).find(k=>typeof p[k]==="string" && p[k].length>2 && p[k].length<120) || null;
+  }
+  let sleutel = store.get("ovu_sleutel") || null;
   // Geef een leesbare naam van het werkingsgebied uit een feature
   function featureNaam(f, laag){
-    const p=f.properties||{};
-    const kand=["naam","Naam","NAAM","werkingsgebied","Werkingsgebied","noemer","Noemer","omschrijving","titel","label","name"];
-    for(const k of kand) if(p[k]) return String(p[k]);
-    const vals=Object.values(p).filter(v=>typeof v==="string" && v.length>2 && v.length<120);
-    return vals[0] || (laag.title||laag.name);
+    const p=f.properties||{}, k=naamSleutel(p);
+    if(k && !sleutel){ sleutel=k; store.set("ovu_sleutel",k); if(gekozen) tekenGebied(); }
+    return k ? String(p[k]) : (laag.title||laag.name);
   }
+
+  // ---------- Eén werkingsgebied tonen als transparante laag ----------
+  const WFS = WMS.replace(/\/wms$/,"/wfs");
+  const BEKEND = ["Gebied ligplaatsen","Gebied dempen oppervlaktewaterlichaam","Zwemlocatie","Landelijk gebied","Gesloten stortplaats",
+    "Beperkingengebied beheer provinciale weg","Beperkingengebied bouwwerken provinciale weg","Beperkingengebied vrij zicht provinciale weg",
+    "Gebied landschappelijke waarden"];
+  let gekozen = null, gebiedLaag = null, sldFout = false;
+  const selEl = document.getElementById("gebied");
+  const hoofdLaag = () => [...actief][0] || (layers[0]&&layers[0].name) || FALLBACK_LAYER;
+  const cqlWaarde = s => "'"+String(s).replace(/'/g,"''")+"'";
+  function sld(laag){
+    return '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc">'
+      +'<NamedLayer><Name>'+laag+'</Name><UserStyle><FeatureTypeStyle><Rule>'
+      +'<PolygonSymbolizer><Fill><CssParameter name="fill">#2fbf71</CssParameter><CssParameter name="fill-opacity">0.4</CssParameter></Fill>'
+      +'<Stroke><CssParameter name="stroke">#4f8a2a</CssParameter><CssParameter name="stroke-width">1.5</CssParameter></Stroke></PolygonSymbolizer>'
+      +'</Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>';
+  }
+  function tekenGebied(){
+    if(gebiedLaag){ map.removeLayer(gebiedLaag); gebiedLaag=null; }
+    if(!gekozen || !sleutel) return;
+    const laag=hoofdLaag();
+    const opt={layers:laag,format:"image/png",transparent:true,version:"1.3.0",maxZoom:19,
+      CQL_FILTER: sleutel+"="+cqlWaarde(gekozen)};
+    if(!sldFout){ opt.SLD_BODY=sld(laag); opt.opacity=1; } else { opt.opacity=.6; }
+    gebiedLaag=L.tileLayer.wms(WMS,opt).addTo(map);
+    let fouten=0;
+    gebiedLaag.on("tileerror",()=>{ if(!sldFout && ++fouten>3){ sldFout=true; tekenGebied(); } });
+  }
+  function kiesGebied(naam){
+    gekozen = naam || null;
+    store.set("ovu_gebied",gekozen);
+    if(selEl.value!==(gekozen||"")) selEl.value=gekozen||"";
+    if(gekozen){
+      Object.keys(wmsLayers).forEach(n=>{ map.removeLayer(wmsLayers[n]); delete wmsLayers[n]; });
+    }else{
+      actief.forEach(n=>{ if(layers.some(l=>l.name===n)) addWms(n); });
+    }
+    tekenGebied();
+    const chip=document.getElementById("chip");
+    chip.hidden=!gekozen;
+    document.getElementById("chipTekst").textContent = gekozen||"";
+  }
+  function vulLijst(namen){
+    const huidig=gekozen;
+    const uniek=[...new Set(namen.filter(Boolean).map(String))];
+    const eigen=uniek.filter(n=>GEBIED_NAAR_AFD(n)).sort((a,b)=>GEBIED_NAAR_AFD(a).id.localeCompare(GEBIED_NAAR_AFD(b).id)||a.localeCompare(b,"nl"));
+    const rest=uniek.filter(n=>!GEBIED_NAAR_AFD(n)).sort((a,b)=>a.localeCompare(b,"nl"));
+    selEl.textContent="";
+    const alle=document.createElement("option"); alle.value=""; alle.textContent="Alle werkingsgebieden"; selEl.appendChild(alle);
+    const groep=(titel,items,metAfd)=>{
+      if(!items.length) return;
+      const g=document.createElement("optgroup"); g.label=titel;
+      for(const n of items){ const o=document.createElement("option"); o.value=n; o.textContent=metAfd?GEBIED_NAAR_AFD(n).id+" · "+n:n; g.appendChild(o); }
+      selEl.appendChild(g);
+    };
+    groep("Jouw afdelingen",eigen,true);
+    groep("Overige werkingsgebieden",rest,false);
+    if(huidig && !uniek.includes(huidig)){ const o=document.createElement("option"); o.value=huidig; o.textContent=huidig; selEl.appendChild(o); }
+    selEl.value=huidig||"";
+  }
+  async function laadGebieden(){
+    vulLijst(BEKEND);
+    const typ=hoofdLaag();
+    try{
+      // 1. Attribuutnaam bepalen met één voorbeeld-object
+      if(!sleutel){
+        const r=await fetch(WFS+"?service=WFS&version=2.0.0&request=GetFeature&typeNames="+encodeURIComponent(typ)+"&count=1&outputFormat=application/json");
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        const j=await r.json(); const k=naamSleutel(j.features&&j.features[0]&&j.features[0].properties);
+        if(!k) throw new Error("geen naamveld");
+        sleutel=k; store.set("ovu_sleutel",k);
+      }
+      // 2. Alle namen ophalen (zonder geometrie)
+      const r2=await fetch(WFS+"?service=WFS&version=2.0.0&request=GetFeature&typeNames="+encodeURIComponent(typ)+"&propertyName="+encodeURIComponent(sleutel)+"&outputFormat=application/json");
+      if(!r2.ok) throw new Error("HTTP "+r2.status);
+      const j2=await r2.json();
+      vulLijst(BEKEND.concat((j2.features||[]).map(f=>f.properties&&f.properties[sleutel])));
+    }catch(e){ /* lijst met bekende gebieden blijft staan */ }
+    if(gekozen) tekenGebied();
+  }
+  selEl.addEventListener("change",()=>kiesGebied(selEl.value));
+  document.getElementById("chipUit").addEventListener("click",()=>kiesGebied(null));
 
   async function checkPoint(latlng){
     if(marker) marker.setLatLng(latlng); else marker=L.marker(latlng).addTo(map);
@@ -327,7 +436,11 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   // Tik op de uitslag in ingeklapte stand klapt het paneel open
   document.getElementById("status").addEventListener("click",()=>{ if(sheet.classList.contains("collapsed")) setCollapsed(false); });
 
-  loadCapabilities();
+  loadCapabilities().then(()=>{
+    const bewaard=store.get("ovu_gebied");
+    if(bewaard) kiesGebied(bewaard);
+    laadGebieden();
+  });
 })();
 </script>
 </body>
