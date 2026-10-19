@@ -130,13 +130,13 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
       </select>
       <button type="button" id="ster" class="ster" disabled aria-pressed="false" aria-label="Markeer als favoriet">☆</button>
     </div>
-    <span class="hint">Kies een gebied en tik op ☆ om het aan je favorieten toe te voegen.</span>
+    <span class="hint">Kies een gebied en tik op ☆ om het aan je favorieten toe te voegen. Je favorieten bepalen of een locatie groen (binnen) of geel (buiten) wordt.</span>
   </div>
   <details id="lagen">
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 11</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 12</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -326,7 +326,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   let favs = store.get("ovu_favs");
   if(!Array.isArray(favs)) favs = BEKEND.filter(n=>GEBIED_NAAR_AFD(n));
   let alleNamen = [];
-  const isFav = n => favs.includes(n);
+  const isFav = n => { const x=norm(n); return favs.some(f=>norm(f)===x); };
   function zetSter(){
     const b=document.getElementById("ster");
     b.disabled=!gekozen;
@@ -340,6 +340,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     if(!gekozen) return;
     favs = isFav(gekozen) ? favs.filter(n=>n!==gekozen) : favs.concat(gekozen);
     store.set("ovu_favs",favs);
+    if(laatstePunt) checkPoint(laatstePunt);
     vulLijst(alleNamen);
   }
   function vulLijst(namen){
@@ -424,7 +425,9 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   gz.addEventListener("input",()=>{ clearTimeout(gzT); gzT=setTimeout(zoekGebieden,120); });
   gz.addEventListener("keydown",e=>{ if(e.key==="Enter"){ const f=gzRes.querySelector("button"); if(f){ e.preventDefault(); f.click(); } } if(e.key==="Escape"){ gz.value=""; gzRes.hidden=true; } });
 
+  let laatstePunt = null;
   async function checkPoint(latlng){
+    laatstePunt = latlng;
     if(marker) marker.setLatLng(latlng); else marker=L.marker(latlng).addTo(map);
     const q=[...actief]; const coord=`${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
     if(!q.length){ setStatus("idle","<b>Geen lagen aan</b>Zet onder Kaartlagen minimaal één laag aan."); return; }
@@ -443,8 +446,8 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
         const lname=(f.id||"").split(".")[0];
         const laag=layers.find(l=>l.name===lname || l.name.endsWith(":"+lname)) || {name:lname,title:lname,afd:null};
         const naam=featureNaam(f,laag);
-        const afd=GEBIED_NAAR_AFD(naam);
-        if(afd) relevant.set(labelVoor(naam),true); else overig.add(naam);
+        // Jouw toepassingsgebieden = je favorieten
+        if(isFav(naam)) relevant.set(labelVoor(naam),true); else overig.add(labelVoor(naam));
       }
       const extra = overig.size
         ? "<details style='border:0;padding:0;margin-top:8px'><summary style='font-weight:400;font-size:13px'>Overige werkingsgebieden op deze plek ("+overig.size+")</summary><ul>"+[...overig].sort().map(k=>"<li>"+esc(k)+"</li>").join("")+"</ul></details>"
@@ -453,7 +456,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
       if(relevant.size){
         setStatus("in","<b>Binnen toepassingsgebied</b><ul>"+[...relevant.keys()].map(k=>"<li>"+esc(k)+"</li>").join("")+"</ul>"+extra+c);
       }else{
-        setStatus("out","<b>Buiten toepassingsgebied</b>Deze locatie valt niet in een van je toepassingsgebieden."+extra+c);
+        setStatus("out","<b>Buiten toepassingsgebied</b>Deze locatie valt niet in een van je favoriete gebieden."+extra+c);
       }
     }catch(e){
       setStatus("err","<b>Automatische controle lukt niet</b>Kijk op de kaart of het punt in een gekleurd vlak valt. ("+esc(e.message)+")<div class='coord' style='margin-top:6px'>"+coord+"</div>");
