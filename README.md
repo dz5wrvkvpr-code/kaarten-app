@@ -1,2 +1,2 @@
 # kaarten-app
-Klaarlagen OV Utrecht 
+Kaartlagen OV Utrecht 
