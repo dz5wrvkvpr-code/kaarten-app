@@ -71,6 +71,14 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   font:16px var(--font);background:var(--bg);color:var(--fg)}
 #gebied:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sheet.collapsed .kies{display:none}
+.kiesrij{display:flex;gap:8px}
+.kiesrij select{flex:1}
+.ster{flex:none;width:44px;height:44px;border:1px solid var(--line);border-radius:10px;background:var(--bg);
+  color:var(--muted);font:22px/1 var(--font)}
+.ster.aan{color:#d99a00}
+.ster:disabled{opacity:.4}
+.ster:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:12px;color:var(--muted)}
 .chip{position:fixed;z-index:1000;top:calc(env(safe-area-inset-top,0px) + 62px);
   left:max(10px,env(safe-area-inset-left,0px));max-width:calc(100% - 20px);display:flex;align-items:center;gap:8px;
   background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:999px;
@@ -100,15 +108,19 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   <div id="status" class="status idle"><b>Tik op de kaart of gebruik 📍</b>Dan zie je direct of de locatie in een toepassingsgebied ligt.</div>
   <div class="kies">
     <label for="gebied">Toon op kaart</label>
-    <select id="gebied">
-      <option value="">Alle werkingsgebieden</option>
-    </select>
+    <div class="kiesrij">
+      <select id="gebied">
+        <option value="">Alle werkingsgebieden</option>
+      </select>
+      <button type="button" id="ster" class="ster" disabled aria-pressed="false" aria-label="Markeer als favoriet">☆</button>
+    </div>
+    <span class="hint">Kies een gebied en tik op ☆ om het aan je favorieten toe te voegen.</span>
   </div>
   <details id="lagen">
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 6</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 7</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -285,24 +297,53 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     const chip=document.getElementById("chip");
     chip.hidden=!gekozen;
     document.getElementById("chipTekst").textContent = gekozen||"";
+    zetSter();
+  }
+  // Favorieten: standaard de gebieden van jouw afdelingen, zelf aan te passen met de ster
+  let favs = store.get("ovu_favs");
+  if(!Array.isArray(favs)) favs = BEKEND.filter(n=>GEBIED_NAAR_AFD(n));
+  let alleNamen = [];
+  const isFav = n => favs.includes(n);
+  function zetSter(){
+    const b=document.getElementById("ster");
+    b.disabled=!gekozen;
+    const aan=!!gekozen && isFav(gekozen);
+    b.textContent = aan ? "★" : "☆";
+    b.classList.toggle("aan",aan);
+    b.setAttribute("aria-pressed",String(aan));
+    b.setAttribute("aria-label", aan ? "Verwijder uit favorieten" : "Markeer als favoriet");
+  }
+  function wisselFav(){
+    if(!gekozen) return;
+    favs = isFav(gekozen) ? favs.filter(n=>n!==gekozen) : favs.concat(gekozen);
+    store.set("ovu_favs",favs);
+    vulLijst(alleNamen);
   }
   function vulLijst(namen){
+    alleNamen = namen;
     const huidig=gekozen;
-    const uniek=[...new Set(namen.filter(Boolean).map(String))];
-    const eigen=uniek.filter(n=>GEBIED_NAAR_AFD(n)).sort((a,b)=>GEBIED_NAAR_AFD(a).id.localeCompare(GEBIED_NAAR_AFD(b).id)||a.localeCompare(b,"nl"));
-    const rest=uniek.filter(n=>!GEBIED_NAAR_AFD(n)).sort((a,b)=>a.localeCompare(b,"nl"));
+    const uniek=[...new Set(namen.concat(favs).filter(Boolean).map(String))];
+    const sorteer=(a,b)=>{
+      const fa=GEBIED_NAAR_AFD(a), fb=GEBIED_NAAR_AFD(b);
+      if(fa && fb) return fa.id.localeCompare(fb.id)||a.localeCompare(b,"nl");
+      if(fa) return -1; if(fb) return 1;
+      return a.localeCompare(b,"nl");
+    };
+    const eigen=uniek.filter(isFav).sort(sorteer);
+    const rest=uniek.filter(n=>!isFav(n)).sort((a,b)=>a.localeCompare(b,"nl"));
     selEl.textContent="";
     const alle=document.createElement("option"); alle.value=""; alle.textContent="Alle werkingsgebieden"; selEl.appendChild(alle);
     const groep=(titel,items,metAfd)=>{
       if(!items.length) return;
       const g=document.createElement("optgroup"); g.label=titel;
-      for(const n of items){ const o=document.createElement("option"); o.value=n; o.textContent=metAfd?GEBIED_NAAR_AFD(n).id+" · "+n:n; g.appendChild(o); }
+      for(const n of items){ const o=document.createElement("option"); o.value=n; const a=GEBIED_NAAR_AFD(n); o.textContent=(metAfd?"★ ":"")+(a?a.id+" · ":"")+n; g.appendChild(o); }
       selEl.appendChild(g);
     };
-    groep("Jouw afdelingen",eigen,true);
-    groep("Overige werkingsgebieden",rest,false);
+    groep("Favorieten",eigen,true);
+    groep("Alle werkingsgebieden (A–Z)",rest,false);
     if(huidig && !uniek.includes(huidig)){ const o=document.createElement("option"); o.value=huidig; o.textContent=huidig; selEl.appendChild(o); }
     selEl.value=huidig||"";
+    zetSter();
   }
   async function laadGebieden(){
     vulLijst(BEKEND);
@@ -326,6 +367,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   }
   selEl.addEventListener("change",()=>kiesGebied(selEl.value));
   document.getElementById("chipUit").addEventListener("click",()=>kiesGebied(null));
+  document.getElementById("ster").addEventListener("click",wisselFav);
 
   async function checkPoint(latlng){
     if(marker) marker.setLatLng(latlng); else marker=L.marker(latlng).addTo(map);
