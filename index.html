@@ -120,7 +120,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 9</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 10</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -131,11 +131,11 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
 
   // Werkingsgebieden per afdeling (zoektermen worden gematcht op laagnaam/-titel)
   const AFDELINGEN = [
-    {id:"2.3", titel:"2.3 Activiteiten in water", termen:["zwemlocatie","gebied ligplaatsen","ligplaats","dempen"]},
-    {id:"3.4", titel:"3.4 Grondverzet en rommelterrein", termen:["landelijk gebied"]},
-    {id:"3.5", titel:"3.5 Gesloten stortplaats", termen:["gesloten stortplaats","stortplaats"]},
-    {id:"4.2", titel:"4.2 Provinciale weg", termen:["beperkingengebied beheer provinciale weg","beperkingengebied bouwwerken provinciale weg","beperkingengebied vrij zicht provinciale weg","provinciale weg"]},
-    {id:"7.2", titel:"7.2 Kwaliteit landschap", termen:["gebied landschappelijke waarden","landschappelijke waarden"]}
+    {id:"2.3", titel:"Activiteiten in water", termen:["zwemlocatie","gebied ligplaatsen","ligplaats","dempen"]},
+    {id:"3.4", titel:"Grondverzet en rommelterrein", termen:["landelijk gebied"]},
+    {id:"3.5", titel:"Gesloten stortplaats", termen:["gesloten stortplaats","stortplaats"]},
+    {id:"4.2", titel:"Provinciale weg", termen:["beperkingengebied beheer provinciale weg","beperkingengebied bouwwerken provinciale weg","beperkingengebied vrij zicht provinciale weg","provinciale weg"]},
+    {id:"7.2", titel:"Kwaliteit landschap", termen:["gebied landschappelijke waarden","landschappelijke waarden"]}
   ];
   const norm = s => (s||"").toLowerCase().replace(/[_\-]+/g," ").replace(/\s+/g," ").trim();
 
@@ -154,11 +154,11 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     return g ? AFDELINGEN.find(a=>a.id===g.afd) : null;
   }
   // Weergavenaam: altijd de afdeling. Heeft een afdeling meerdere gebieden, dan volgt het gebied erachter.
-  const MEERDERE_GEBIEDEN = new Set(["2.3","4.2"]);
+  // Overal hetzelfde: "Titel afdeling - Naam kaartlaag" (zonder nummer). Zijn ze gelijk, dan één keer.
   function labelVoor(naam){
     const a=GEBIED_NAAR_AFD(naam);
     if(!a) return naam;
-    return MEERDERE_GEBIEDEN.has(a.id) ? a.titel+" — "+naam : a.titel;
+    return norm(a.titel)===norm(naam) ? a.titel : a.titel+" - "+naam;
   }
   const store = {
     get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
@@ -405,7 +405,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
       if(relevant.size){
         setStatus("in","<b>Binnen toepassingsgebied</b><ul>"+[...relevant.keys()].map(k=>"<li>"+esc(k)+"</li>").join("")+"</ul>"+extra+c);
       }else{
-        setStatus("out","<b>Buiten toepassingsgebied</b>Niet in afdeling "+AFDELINGEN.map(a=>a.id).join(", ")+"."+extra+c);
+        setStatus("out","<b>Buiten toepassingsgebied</b>Deze locatie valt niet in een van je toepassingsgebieden."+extra+c);
       }
     }catch(e){
       setStatus("err","<b>Automatische controle lukt niet</b>Kijk op de kaart of het punt in een gekleurd vlak valt. ("+esc(e.message)+")<div class='coord' style='margin-top:6px'>"+coord+"</div>");
