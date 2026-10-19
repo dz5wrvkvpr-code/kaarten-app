@@ -120,7 +120,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     <summary>Kaartlagen</summary>
     <div id="layerlist"><span class="coord">Lagen laden…</span></div>
   </details>
-  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 7</p>
+  <p class="note">Bron: Omgevingsverordening provincie Utrecht (geodata-utrecht.nl). Indicatief hulpmiddel; de vastgestelde werkingsgebieden op omgevingswet.overheid.nl zijn leidend. · Versie 9</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -131,11 +131,11 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
 
   // Werkingsgebieden per afdeling (zoektermen worden gematcht op laagnaam/-titel)
   const AFDELINGEN = [
-    {id:"2.3", titel:"Afdeling 2.3 Activiteiten in water", termen:["zwemlocatie","gebied ligplaatsen","ligplaats","dempen"]},
-    {id:"3.4", titel:"Afdeling 3.4 Grondverzet en rommelterrein", termen:["landelijk gebied"]},
-    {id:"3.5", titel:"Afdeling 3.5 Gesloten stortplaats", termen:["gesloten stortplaats","stortplaats"]},
-    {id:"4.2", titel:"Afdeling 4.2 Provinciale weg", termen:["beperkingengebied beheer provinciale weg","beperkingengebied bouwwerken provinciale weg","beperkingengebied vrij zicht provinciale weg","provinciale weg"]},
-    {id:"7.2", titel:"Afdeling 7.2 Kwaliteit landschap", termen:["gebied landschappelijke waarden","landschappelijke waarden"]}
+    {id:"2.3", titel:"2.3 Activiteiten in water", termen:["zwemlocatie","gebied ligplaatsen","ligplaats","dempen"]},
+    {id:"3.4", titel:"3.4 Grondverzet en rommelterrein", termen:["landelijk gebied"]},
+    {id:"3.5", titel:"3.5 Gesloten stortplaats", termen:["gesloten stortplaats","stortplaats"]},
+    {id:"4.2", titel:"4.2 Provinciale weg", termen:["beperkingengebied beheer provinciale weg","beperkingengebied bouwwerken provinciale weg","beperkingengebied vrij zicht provinciale weg","provinciale weg"]},
+    {id:"7.2", titel:"7.2 Kwaliteit landschap", termen:["gebied landschappelijke waarden","landschappelijke waarden"]}
   ];
   const norm = s => (s||"").toLowerCase().replace(/[_\-]+/g," ").replace(/\s+/g," ").trim();
 
@@ -152,6 +152,13 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
   function GEBIED_NAAR_AFD(naam){
     const n=norm(naam), g=GEBIEDEN.find(g=>g.test(n));
     return g ? AFDELINGEN.find(a=>a.id===g.afd) : null;
+  }
+  // Weergavenaam: altijd de afdeling. Heeft een afdeling meerdere gebieden, dan volgt het gebied erachter.
+  const MEERDERE_GEBIEDEN = new Set(["2.3","4.2"]);
+  function labelVoor(naam){
+    const a=GEBIED_NAAR_AFD(naam);
+    if(!a) return naam;
+    return MEERDERE_GEBIEDEN.has(a.id) ? a.titel+" — "+naam : a.titel;
   }
   const store = {
     get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
@@ -296,7 +303,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     tekenGebied();
     const chip=document.getElementById("chip");
     chip.hidden=!gekozen;
-    document.getElementById("chipTekst").textContent = gekozen||"";
+    document.getElementById("chipTekst").textContent = gekozen ? labelVoor(gekozen) : "";
     zetSter();
   }
   // Favorieten: standaard de gebieden van jouw afdelingen, zelf aan te passen met de ster
@@ -325,18 +332,18 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
     const uniek=[...new Set(namen.concat(favs).filter(Boolean).map(String))];
     const sorteer=(a,b)=>{
       const fa=GEBIED_NAAR_AFD(a), fb=GEBIED_NAAR_AFD(b);
-      if(fa && fb) return fa.id.localeCompare(fb.id)||a.localeCompare(b,"nl");
+      if(fa && fb) return fa.id.localeCompare(fb.id)||labelVoor(a).localeCompare(labelVoor(b),"nl");
       if(fa) return -1; if(fb) return 1;
       return a.localeCompare(b,"nl");
     };
     const eigen=uniek.filter(isFav).sort(sorteer);
-    const rest=uniek.filter(n=>!isFav(n)).sort((a,b)=>a.localeCompare(b,"nl"));
+    const rest=uniek.filter(n=>!isFav(n)).sort((a,b)=>labelVoor(a).localeCompare(labelVoor(b),"nl"));
     selEl.textContent="";
     const alle=document.createElement("option"); alle.value=""; alle.textContent="Alle werkingsgebieden"; selEl.appendChild(alle);
     const groep=(titel,items,metAfd)=>{
       if(!items.length) return;
       const g=document.createElement("optgroup"); g.label=titel;
-      for(const n of items){ const o=document.createElement("option"); o.value=n; const a=GEBIED_NAAR_AFD(n); o.textContent=(metAfd?"★ ":"")+(a?a.id+" · ":"")+n; g.appendChild(o); }
+      for(const n of items){ const o=document.createElement("option"); o.value=n; o.textContent=(metAfd?"★ ":"")+labelVoor(n); g.appendChild(o); }
       selEl.appendChild(g);
     };
     groep("Favorieten",eigen,true);
@@ -389,7 +396,7 @@ label.ly input{width:20px;height:20px;margin:0;flex:none;accent-color:var(--acce
         const laag=layers.find(l=>l.name===lname || l.name.endsWith(":"+lname)) || {name:lname,title:lname,afd:null};
         const naam=featureNaam(f,laag);
         const afd=GEBIED_NAAR_AFD(naam);
-        if(afd) relevant.set(afd.titel+" — "+naam,true); else overig.add(naam);
+        if(afd) relevant.set(labelVoor(naam),true); else overig.add(naam);
       }
       const extra = overig.size
         ? "<details style='border:0;padding:0;margin-top:8px'><summary style='font-weight:400;font-size:13px'>Overige werkingsgebieden op deze plek ("+overig.size+")</summary><ul>"+[...overig].sort().map(k=>"<li>"+esc(k)+"</li>").join("")+"</ul></details>"
